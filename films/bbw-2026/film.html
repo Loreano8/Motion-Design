@@ -1,0 +1,168 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>BBW 2026 — 10 s loop</title>
+<style>
+  html, body { margin: 0; background: #0B0E11; }
+  canvas { display: block; width: 1080px; height: 1920px; }
+  body:not(.render) canvas { width: auto; height: 100vh; margin: 0 auto; }
+</style>
+<script src="timing.js"></script>
+</head>
+<body>
+<canvas id="c" width="1080" height="1920"></canvas>
+<script>
+const T = window.TIMING;
+const W = T.width, H = T.height, DURATION = T.duration;
+const C = { bg: '#0B0E11', ink: '#F5F3EE', muted: '#5E6673', accent: '#F0B90B', dot: '#141920' };
+const ctx = document.getElementById('c').getContext('2d');
+
+// ---------- maths, all closed-form in t ----------
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+function bezier(x1, y1, x2, y2) {
+  const bx = u => 3 * x1 * u * (1 - u) ** 2 + 3 * x2 * u * u * (1 - u) + u ** 3;
+  const by = u => 3 * y1 * u * (1 - u) ** 2 + 3 * y2 * u * u * (1 - u) + u ** 3;
+  return x => {
+    x = clamp(x); let lo = 0, hi = 1;
+    for (let i = 0; i < 40; i++) { const m = (lo + hi) / 2; (bx(m) < x) ? lo = m : hi = m; }
+    return by((lo + hi) / 2);
+  };
+}
+const easeIn  = bezier(0.16, 1, 0.3, 1);     // entrances
+const easeOut = bezier(0.7, 0, 0.84, 0);     // exits
+const pop     = bezier(0.34, 1.56, 0.64, 1); // date pop
+// impulse response of a damped spring, damping ratio z, natural frequency w
+function spring(dt, z = 0.8, w = 22) {
+  if (dt < 0) return 0;
+  const wd = w * Math.sqrt(1 - z * z);
+  return Math.exp(-z * w * dt) * Math.sin(wd * dt);
+}
+const enter = (t, t0, len = 0.7) => easeIn((t - t0) / len);
+// exit progress for the i-th element, top to bottom
+const exitP = (t, i) => easeOut((t - (T.exit.start + i * T.exit.stagger)) / T.exit.length);
+
+// ---------- layout ----------
+const B = { size: 150, gap: 40, top: 400 };
+B.x0 = (W - (4 * B.size + 3 * B.gap)) / 2;
+const FALL = 0.35;
+
+function text(str, x, y, { font, color, align = 'center', spacing = '0px', alpha = 1, scale = 1 }) {
+  if (alpha <= 0) return;
+  ctx.save();
+  ctx.globalAlpha = clamp(alpha);
+  ctx.font = font; ctx.fillStyle = color; ctx.textAlign = align; ctx.textBaseline = 'alphabetic';
+  ctx.letterSpacing = spacing;
+  ctx.translate(x, y); ctx.scale(scale, scale);
+  ctx.fillText(str, 0, 0);
+  ctx.restore();
+}
+
+let titleSize = 140;
+function fitTitle() {
+  ctx.font = `900 100px "Inter Display"`; ctx.letterSpacing = '-3px';
+  titleSize = Math.floor(100 * 920 / ctx.measureText('BLOCKCHAIN').width);
+}
+
+// ---------- the frame ----------
+window.renderAt = (t) => {
+  ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = C.dot;                              // static dot grid
+  for (let y = 60; y < H; y += 60) for (let x = 60; x < W; x += 60) ctx.fillRect(x - 2, y - 2, 4, 4);
+  ctx.save(); ctx.translate(0, -130);                 // keep clear of the phone UI at the bottom
+
+  // block-height counter (exit index 0)
+  const landed = T.blocks.filter(L => t >= L).length;
+  const e0 = exitP(t, 0);
+  text(`BLOCK HEIGHT ${String(landed).padStart(6, '0')}`, W / 2, 250 - 60 * e0, {
+    font: '500 30px "JetBrains Mono"', color: C.muted, spacing: '6px',
+    alpha: enter(t, T.blocks[0], 0.3) * (1 - e0) });
+
+  // blocks
+  const lift = easeOut((t - T.exit.blocks) / 0.4);
+  T.blocks.forEach((L, k) => {
+    const t0 = L - FALL;
+    if (t < t0) return;
+    const x = B.x0 + k * (B.size + B.gap);
+    const u = clamp((t - t0) / FALL);
+    let yTop = -B.size - 40 + (B.top + B.size + 40) * u * u;   // gravity: position ~ u^2
+    yTop -= lift * 1600;
+    const s = 0.8 * spring(t - L);                             // landing squash, damping 0.8
+    const sx = 1 + s, sy = 1 - s;
+    ctx.save();
+    ctx.translate(x + B.size / 2, yTop + B.size);              // pivot: bottom centre
+    ctx.scale(sx, sy);
+    ctx.fillStyle = k === 3 ? C.accent : C.ink;
+    ctx.fillRect(-B.size / 2, -B.size, B.size, B.size);
+    ctx.font = '500 24px "JetBrains Mono"'; ctx.fillStyle = C.bg; ctx.textAlign = 'center';
+    ctx.letterSpacing = '0px';
+    ctx.fillText(`#${String(k + 1).padStart(4, '0')}`, 0, -B.size / 2 + 9);
+    ctx.restore();
+    // chain link to the previous block, drawn after this one lands
+    if (k > 0 && t >= L) {
+      const p = easeIn((t - L) / 0.2);
+      const xa = x - B.gap, yMid = B.top + B.size / 2 - lift * 1600;
+      ctx.fillStyle = C.ink;
+      ctx.fillRect(xa, yMid - 4, B.gap * p, 8);
+    }
+  });
+
+  // title words (exit 1..3)
+  const w = T.words;
+  const e1 = exitP(t, 1), e2 = exitP(t, 2), e3 = exitP(t, 3);
+  let p = enter(t, w.BINANCE);
+  text('BINANCE', W / 2, 770 + 40 * (1 - p) - 60 * e1, {
+    font: '600 54px "Inter Display"', color: C.ink, spacing: '18px', alpha: p * (1 - e1) });
+  p = enter(t, w.BLOCKCHAIN);
+  const yT = 770 + Math.round(titleSize * 1.05);
+  text('BLOCKCHAIN', W / 2, yT + 40 * (1 - p) - 60 * e2, {
+    font: `900 ${titleSize}px "Inter Display"`, color: C.ink, spacing: '-3px', alpha: p * (1 - e2) });
+  p = enter(t, w.WEEK);
+  text('WEEK', W / 2, yT + titleSize * 0.98 + 40 * (1 - p) - 60 * e3, {
+    font: `900 ${titleSize}px "Inter Display"`, color: C.accent, spacing: '-3px', alpha: p * (1 - e3) });
+
+  // dates (exit 4, 5)
+  const d = T.dates, e4 = exitP(t, 4), e5 = exitP(t, 5);
+  const yD = 1420;
+  for (const [str, x, align, t0] of [['28', W / 2 - 75, 'right', d['28']], ['29', W / 2 + 75, 'left', d['29']]]) {
+    const q = clamp((t - t0) / 0.5);
+    if (q <= 0) continue;
+    text(str, x, yD - 60 * e4, { font: '900 280px "Inter Display"', color: C.ink, align, spacing: '-8px',
+      alpha: clamp(q * 4) * (1 - e4), scale: 0.6 + 0.4 * pop(q) });
+  }
+  text('–', W / 2, yD - 30 - 60 * e4, { font: '900 160px "Inter Display"', color: C.muted,
+    alpha: enter(t, d['29'], 0.3) * (1 - e4) });
+  p = enter(t, d['NOVEMBER 2026']);
+  text('NOVEMBER 2026', W / 2, yD + 90 + 40 * (1 - p) - 60 * e5, {
+    font: '500 40px "JetBrains Mono"', color: C.ink, spacing: '10px', alpha: p * (1 - e5) });
+
+  // place (exit 6, 7)
+  const e6 = exitP(t, 6), e7 = exitP(t, 7);
+  p = enter(t, T.place.BANGKOK);
+  text('BANGKOK', W / 2, 1690 + 40 * (1 - p) - 60 * e6, {
+    font: '900 128px "Inter Display"', color: C.ink, spacing: '-2px', alpha: p * (1 - e6) });
+  p = enter(t, T.place.VENUE);
+  for (const [i, line] of ['QUEEN SIRIKIT NATIONAL', 'CONVENTION CENTER'].entries())
+    text(line, W / 2, 1770 + i * 44 + 40 * (1 - p) - 60 * e7, {
+      font: '500 30px "JetBrains Mono"', color: C.muted, spacing: '6px', alpha: p * (1 - e7) });
+  ctx.restore();
+};
+
+// ---------- boot ----------
+const render = new URLSearchParams(location.search).has('render');
+if (render) document.body.classList.add('render');
+Promise.all([
+  document.fonts.load('900 100px "Inter Display"'),
+  document.fonts.load('600 54px "Inter Display"'),
+  document.fonts.load('500 30px "JetBrains Mono"'),
+]).then(() => {
+  fitTitle();
+  window.__ready = true;
+  if (!render) {
+    const loop = ms => { renderAt((ms / 1000) % DURATION); requestAnimationFrame(loop); };
+    requestAnimationFrame(loop);
+  }
+});
+</script>
+</body>
+</html>

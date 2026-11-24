@@ -1,0 +1,4 @@
+films/*/picture.mp4
+films/*/score.wav
+films/*/render.log
+node_modules/
