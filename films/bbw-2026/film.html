@@ -87,7 +87,11 @@ window.renderAt = (t) => {
     const u = clamp((t - t0) / FALL);
     let yTop = -B.size - 40 + (B.top + B.size + 40) * u * u;   // gravity: position ~ u^2
     yTop -= lift * 1600;
-    const s = 0.8 * spring(t - L);                             // landing squash, damping 0.8
+    let s = 0.8 * spring(t - L);                               // landing squash, damping 0.8
+    if (k === 3) {                                             // accent block pulses on every kick
+      const tb = clamp(Math.floor(t / 0.5) * 0.5, 2.5, 8.5);
+      if (t >= 2.5) s += 0.3 * spring(t - tb, 0.5, 26);
+    }
     const sx = 1 + s, sy = 1 - s;
     ctx.save();
     ctx.translate(x + B.size / 2, yTop + B.size);              // pivot: bottom centre
